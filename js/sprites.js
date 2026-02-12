@@ -765,15 +765,19 @@ const Sprites = (() => {
         ctx.restore();
     }
 
+    // Reuse a single offscreen canvas for player sprite each frame
+    let _playerCanvas = null;
     function getPlayerSprite(dir, walkFrame, actionTimer, toolType, breathFrame) {
-        // Don't cache player sprite - it's animated every frame
-        const c = document.createElement('canvas');
-        c.width = TILE;
-        c.height = TILE;
-        const ctx = c.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
-        drawPlayer(ctx, dir, walkFrame, actionTimer, toolType, breathFrame);
-        return c;
+        if (!_playerCanvas) {
+            _playerCanvas = document.createElement('canvas');
+            _playerCanvas.width = TILE;
+            _playerCanvas.height = TILE;
+        }
+        const pctx = _playerCanvas.getContext('2d');
+        pctx.imageSmoothingEnabled = false;
+        pctx.clearRect(0, 0, TILE, TILE);
+        drawPlayer(pctx, dir, walkFrame, actionTimer, toolType, breathFrame);
+        return _playerCanvas;
     }
 
     // ---- ENEMY SPRITES ----
@@ -943,19 +947,28 @@ const Sprites = (() => {
         ctx.restore();
     }
 
+    // Reuse offscreen canvases for enemy sprites (one per size)
+    let _enemyCanvas32 = null;
+    let _enemyCanvas48 = null;
     function getEnemySprite(type, frame, variant) {
-        // Enemies are animated, generate fresh each frame
-        const size = type === ENEMY_TYPE.BOSS ? 48 : TILE;
-        const c = document.createElement('canvas');
-        c.width = size;
-        c.height = size;
-        const ctx = c.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
+        const isBoss = type === ENEMY_TYPE.BOSS;
+        const size = isBoss ? 48 : TILE;
+        let c;
+        if (isBoss) {
+            if (!_enemyCanvas48) { _enemyCanvas48 = document.createElement('canvas'); _enemyCanvas48.width = 48; _enemyCanvas48.height = 48; }
+            c = _enemyCanvas48;
+        } else {
+            if (!_enemyCanvas32) { _enemyCanvas32 = document.createElement('canvas'); _enemyCanvas32.width = TILE; _enemyCanvas32.height = TILE; }
+            c = _enemyCanvas32;
+        }
+        const ectx = c.getContext('2d');
+        ectx.imageSmoothingEnabled = false;
+        ectx.clearRect(0, 0, size, size);
         switch (type) {
-            case ENEMY_TYPE.SLIME: drawSlime(ctx, frame, variant); break;
-            case ENEMY_TYPE.BAT: drawBat(ctx, frame); break;
-            case ENEMY_TYPE.SKELETON: drawSkeleton(ctx, frame); break;
-            case ENEMY_TYPE.BOSS: drawBoss(ctx, frame); break;
+            case ENEMY_TYPE.SLIME: drawSlime(ectx, frame, variant); break;
+            case ENEMY_TYPE.BAT: drawBat(ectx, frame); break;
+            case ENEMY_TYPE.SKELETON: drawSkeleton(ectx, frame); break;
+            case ENEMY_TYPE.BOSS: drawBoss(ectx, frame); break;
         }
         return c;
     }
