@@ -181,14 +181,14 @@ function generateOverworld() {
 
     // ---- PATHS connecting zones ----
     function clearPath(x1, y1, x2, y2) {
-        // Horizontal then vertical
+        // Horizontal then vertical; place bridges over water
         const sx = Math.min(x1, x2), ex = Math.max(x1, x2);
         const sy = Math.min(y1, y2), ey = Math.max(y1, y2);
         for (let x = sx; x <= ex; x++) {
             for (let d = 0; d <= 1; d++) {
                 const py = y1 + d;
                 if (py >= 0 && py < OVERWORLD_H && x >= 0 && x < OVERWORLD_W) {
-                    map.tiles[py][x] = TILES.PATH;
+                    map.tiles[py][x] = map.tiles[py][x] === TILES.WATER ? TILES.BRIDGE : TILES.PATH;
                     map.objects[py][x] = OBJECTS.NONE;
                 }
             }
@@ -197,7 +197,7 @@ function generateOverworld() {
             for (let d = 0; d <= 1; d++) {
                 const px = x2 + d;
                 if (y >= 0 && y < OVERWORLD_H && px >= 0 && px < OVERWORLD_W) {
-                    map.tiles[y][px] = TILES.PATH;
+                    map.tiles[y][px] = map.tiles[y][px] === TILES.WATER ? TILES.BRIDGE : TILES.PATH;
                     map.objects[y][px] = OBJECTS.NONE;
                 }
             }

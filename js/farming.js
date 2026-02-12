@@ -7,6 +7,8 @@ const Farming = (() => {
     function till(map, player, x, y) {
         if (map.type !== MAP_TYPE.OVERWORLD) return false;
         if (map.tiles[y][x] !== TILES.DIRT) return false;
+        // Restrict tilling to farm zone
+        if (x < FARM_X || x >= FARM_X + FARM_W || y < FARM_Y || y >= FARM_Y + FARM_H) return false;
         if (player.stamina < 3) return false;
 
         map.tiles[y][x] = TILES.FARM_DIRT;

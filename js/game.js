@@ -24,6 +24,13 @@ const Game = (() => {
     // Camera
     let camX = 0, camY = 0;
 
+    // Screen shake
+    let shakeTimer = 0, shakeIntensity = 0;
+    function triggerShake(intensity, duration) {
+        shakeIntensity = intensity || 4;
+        shakeTimer = duration || 10;
+    }
+
     // Transition
     let transition = { active: false, alpha: 0, callback: null, phase: 'none' };
 
@@ -148,6 +155,9 @@ const Game = (() => {
             case STATE.FISHING:
                 updateFishing();
                 break;
+            case STATE.PAUSED:
+                updatePaused();
+                break;
         }
     }
 
@@ -214,6 +224,12 @@ const Game = (() => {
             handleDropItem();
         }
 
+        // Pause
+        if (isJustPressed('Escape')) {
+            state = STATE.PAUSED;
+            Audio.sfx.open();
+        }
+
         // Quick save
         if (isJustPressed('KeyP') && currentMap.type !== MAP_TYPE.DUNGEON) {
             if (SaveSystem.save(player, overworldMap, Weather.current)) {
@@ -234,7 +250,14 @@ const Game = (() => {
 
         // Enemy AI
         if (currentMap.type === MAP_TYPE.DUNGEON) {
+            const hpBefore = player.hp;
             Combat.updateEnemies(currentMap, player, particles, floatingTexts);
+            if (player.hp < hpBefore) {
+                triggerShake(4, 8);
+            }
+            if (player.dead && hpBefore > 0) {
+                triggerShake(8, 20);
+            }
             // Explore dungeon minimap
             if (currentMap.explored) {
                 const revealRadius = 4;
@@ -287,7 +310,9 @@ const Game = (() => {
             const enemy = currentMap.getEnemy(nx, ny);
             if (enemy && enemy.hp > 0) {
                 const result = Combat.playerAttack(player, enemy, particles, floatingTexts);
+                triggerShake(3, 6);
                 if (result) {
+                    triggerShake(6, 12);
                     if (result.drops.length > 0) {
                         const names = result.drops.map(id => ITEM_DB[id]?.name || '?').join(', ');
                         UI.showMessage(`Got: ${names}`);
@@ -353,7 +378,9 @@ const Game = (() => {
             const enemy = currentMap.getEnemy(fx, fy);
             if (enemy && enemy.hp > 0) {
                 const result = Combat.playerAttack(player, enemy, particles, floatingTexts);
+                triggerShake(3, 6);
                 if (result) {
+                    triggerShake(6, 12);
                     if (result.drops.length > 0) {
                         const names = result.drops.map(id => ITEM_DB[id]?.name || '?').join(', ');
                         UI.showMessage(`Got: ${names}`);
@@ -530,6 +557,11 @@ const Game = (() => {
 
             // Water crop
             if (crop && selectedItem && selectedItem.toolType === TOOL_TYPE.WATERING_CAN) {
+                if (player.stamina < 2) {
+                    UI.showMessage('Too tired! Rest or use a tonic.');
+                    Audio.sfx.error();
+                    return;
+                }
                 if (Farming.water(currentMap, player, fx, fy)) {
                     UI.showMessage('Watered crop.');
                     particles.emit(fx * TILE + HALF_TILE, fy * TILE + HALF_TILE, 5, '#6aaedd', 1.5);
@@ -550,8 +582,19 @@ const Game = (() => {
                 }
             }
 
-            // Till soil
+            // Till soil (only in farm zone)
             if (selectedItem && selectedItem.toolType === TOOL_TYPE.HOE) {
+                const inFarmZone = fx >= FARM_X && fx < FARM_X + FARM_W && fy >= FARM_Y && fy < FARM_Y + FARM_H;
+                if (!inFarmZone && currentMap.tiles[fy] && currentMap.tiles[fy][fx] === TILES.DIRT) {
+                    UI.showMessage('Can only till soil in the farm area.');
+                    Audio.sfx.error();
+                    return;
+                }
+                if (player.stamina < 3) {
+                    UI.showMessage('Too tired! Rest or use a tonic.');
+                    Audio.sfx.error();
+                    return;
+                }
                 if (Farming.till(currentMap, player, fx, fy)) {
                     UI.showMessage('Tilled soil.');
                     particles.emit(fx * TILE + HALF_TILE, fy * TILE + HALF_TILE, 4, '#8a6a42', 1.5);
@@ -561,18 +604,29 @@ const Game = (() => {
 
             // Chop tree
             if (currentMap.objects[fy] && currentMap.objects[fy][fx] === OBJECTS.TREE) {
+                if (!player.hasItem(ITEM.AXE)) {
+                    UI.showMessage('Need an axe to chop trees.');
+                    return;
+                }
+                if (player.stamina < 5) {
+                    UI.showMessage('Too tired! Rest or use a tonic.');
+                    Audio.sfx.error();
+                    return;
+                }
                 if (Farming.chopTree(currentMap, player, fx, fy)) {
                     UI.showMessage('Chopped tree! Got wood.');
                     particles.emit(fx * TILE + HALF_TILE, fy * TILE + HALF_TILE, 8, '#6a4a2a', 2);
-                    return;
-                } else if (!player.hasItem(ITEM.AXE)) {
-                    UI.showMessage('Need an axe to chop trees.');
                     return;
                 }
             }
 
             // Mine rock
             if (currentMap.objects[fy] && currentMap.objects[fy][fx] === OBJECTS.ROCK) {
+                if (player.stamina < 5) {
+                    UI.showMessage('Too tired! Rest or use a tonic.');
+                    Audio.sfx.error();
+                    return;
+                }
                 if (Farming.mineRock(currentMap, player, fx, fy)) {
                     UI.showMessage('Mined rock!');
                     particles.emit(fx * TILE + HALF_TILE, fy * TILE + HALF_TILE, 6, '#8a8a9a', 2);
@@ -745,6 +799,30 @@ const Game = (() => {
         }
     }
 
+    function updatePaused() {
+        if (isJustPressed('Escape') || isJustPressed('KeyP')) {
+            state = STATE.PLAYING;
+            Audio.sfx.close();
+        }
+        if (isJustPressed('KeyS') || isJustPressed('Digit1')) {
+            if (currentMap.type !== MAP_TYPE.DUNGEON) {
+                if (SaveSystem.save(player, overworldMap, Weather.current)) {
+                    UI.showMessage('Game saved!');
+                }
+            } else {
+                UI.showMessage("Can't save in the dungeon!");
+                Audio.sfx.error();
+            }
+        }
+        if (isJustPressed('KeyQ')) {
+            startTransition(() => {
+                state = STATE.TITLE;
+                Audio.stopMusic();
+                Audio.playMusic('title');
+            });
+        }
+    }
+
     // ---- CAMERA ----
     function updateCamera() {
         const targetX = player.px - CANVAS_W / 2 + HALF_TILE;
@@ -868,6 +946,26 @@ const Game = (() => {
             Sprites.fillCircle(ctx, tx + 14 + sway, ty - 15, 10);
         }
 
+        // Animated player character on ground
+        const playerTitleX = 180;
+        const playerTitleY = 490;
+        const walkDir = Math.floor(titleFrame / 40) % 4;
+        const walkAnimFrame = Math.floor(titleFrame / 10);
+        const playerSprite = Sprites.getPlayerSprite(DIR.DOWN, walkAnimFrame, 0, null, titleFrame);
+        ctx.save();
+        ctx.translate(playerTitleX, playerTitleY);
+        ctx.scale(2.5, 2.5);
+        ctx.drawImage(playerSprite, 0, 0);
+        ctx.restore();
+
+        // Small house near player
+        const houseSprite = Sprites.getHouseSprite();
+        ctx.save();
+        ctx.translate(70, 468);
+        ctx.scale(0.8, 0.8);
+        ctx.drawImage(houseSprite, 0, 0);
+        ctx.restore();
+
         // Title text
         const titleGlow = Math.sin(titleFrame * 0.04) * 0.3 + 0.7;
         ctx.save();
@@ -876,30 +974,65 @@ const Game = (() => {
         ctx.font = 'bold 52px "Nunito", sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = `rgba(90, 184, 90, ${titleGlow})`;
-        ctx.fillText('VERDANT HOLLOW', CANVAS_W / 2, 180);
+        ctx.fillText('VERDANT HOLLOW', CANVAS_W / 2, 160);
         ctx.shadowBlur = 0;
         ctx.restore();
 
         // Subtitle
-        drawText(ctx, 'A Farming & Dungeon RPG', CANVAS_W / 2, 210, 'rgba(200, 200, 180, 0.7)', 16, 'center');
+        drawText(ctx, 'A Farming & Dungeon RPG', CANVAS_W / 2, 195, 'rgba(200, 200, 180, 0.7)', 16, 'center');
 
         // Menu options
         const blink = Math.floor(titleFrame / 30) % 2 === 0;
+        const menuY = 260;
         if (blink) {
-            drawTextBold(ctx, 'Press ENTER to Start', CANVAS_W / 2, 290, COLORS.UI_TEXT, 18, 'center');
+            drawTextBold(ctx, 'Press ENTER to Start', CANVAS_W / 2, menuY, COLORS.UI_TEXT, 18, 'center');
         }
 
         if (SaveSystem.hasSave()) {
-            drawText(ctx, 'Press L to Load Save', CANVAS_W / 2, 325, COLORS.UI_GOLD, 14, 'center');
+            drawText(ctx, 'Press L to Load Save', CANVAS_W / 2, menuY + 35, COLORS.UI_GOLD, 14, 'center');
         }
 
-        // Controls
-        drawText(ctx, 'WASD: Move  |  E: Interact  |  I: Inventory  |  Space: Use Item  |  1-8: Hotbar',
-            CANVAS_W / 2, CANVAS_H - 30, COLORS.UI_TEXT_DIM, 11, 'center');
+        // Feature highlights
+        const featureY = menuY + 80;
+        const features = [
+            { icon: 'Farm', color: '#5ab85a' },
+            { icon: 'Fish', color: '#6aaedd' },
+            { icon: 'Craft', color: '#e8c040' },
+            { icon: 'Fight', color: '#e86565' }
+        ];
+        const fGap = 100;
+        const fStartX = CANVAS_W / 2 - (features.length - 1) * fGap / 2;
+        for (let i = 0; i < features.length; i++) {
+            const fx = fStartX + i * fGap;
+            const bounce = Math.sin(titleFrame * 0.05 + i * 1.5) * 3;
+            ctx.fillStyle = features[i].color;
+            Sprites.fillCircle(ctx, fx, featureY + bounce, 18);
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            Sprites.fillCircle(ctx, fx, featureY + bounce, 14);
+            drawTextBold(ctx, features[i].icon, fx, featureY + bounce - 6, features[i].color, 11, 'center');
+        }
+
+        // Controls panel
+        ctx.fillStyle = 'rgba(20, 18, 30, 0.7)';
+        roundRect(ctx, CANVAS_W / 2 - 280, CANVAS_H - 52, 560, 44, 6);
+        ctx.fill();
+        drawText(ctx, 'Arrows/WASD: Move  |  E: Interact  |  I: Inventory  |  Space: Use  |  1-8: Hotbar  |  ESC: Pause',
+            CANVAS_W / 2, CANVAS_H - 38, COLORS.UI_TEXT_DIM, 11, 'center');
+        drawText(ctx, 'Q: Drop  |  P: Quick Save  |  Hold Space: Fishing',
+            CANVAS_W / 2, CANVAS_H - 22, COLORS.UI_TEXT_DIM, 10, 'center');
     }
 
     function renderGame() {
         const map = currentMap;
+
+        // Apply screen shake
+        ctx.save();
+        if (shakeTimer > 0) {
+            shakeTimer--;
+            const sx = (Math.random() - 0.5) * shakeIntensity * 2;
+            const sy = (Math.random() - 0.5) * shakeIntensity * 2;
+            ctx.translate(sx, sy);
+        }
 
         // Calculate visible tile range
         const startX = Math.max(0, Math.floor(camX / TILE) - 1);
@@ -1015,13 +1148,30 @@ const Game = (() => {
         // Death overlay
         if (player.dead) {
             const deathAlpha = Math.min(1, (DEATH_TIMER - player.deathTimer) / 30);
-            ctx.fillStyle = `rgba(100, 20, 20, ${deathAlpha * 0.4})`;
+            ctx.fillStyle = `rgba(80, 10, 10, ${deathAlpha * 0.55})`;
             ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-            drawTextBold(ctx, 'Defeated!', CANVAS_W / 2, CANVAS_H / 2 - 20, '#e86565', 32, 'center');
-            drawText(ctx, 'Returning to farm...', CANVAS_W / 2, CANVAS_H / 2 + 20, COLORS.UI_TEXT_DIM, 16, 'center');
+
+            // Vignette effect
+            const vigGrad = ctx.createRadialGradient(CANVAS_W / 2, CANVAS_H / 2, 50, CANVAS_W / 2, CANVAS_H / 2, CANVAS_W * 0.5);
+            vigGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            vigGrad.addColorStop(1, `rgba(80, 0, 0, ${deathAlpha * 0.6})`);
+            ctx.fillStyle = vigGrad;
+            ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+            drawTextBold(ctx, 'Defeated!', CANVAS_W / 2, CANVAS_H / 2 - 30, '#e86565', 36, 'center');
+            const goldLost = Math.floor(player.gold * 0.2);
+            if (goldLost > 0) {
+                drawText(ctx, `Lost ${goldLost}G...`, CANVAS_W / 2, CANVAS_H / 2 + 10, COLORS.UI_GOLD, 14, 'center');
+            }
+            drawText(ctx, 'Returning to farm...', CANVAS_W / 2, CANVAS_H / 2 + 35, COLORS.UI_TEXT_DIM, 14, 'center');
         }
 
         // UI layers
+        UI.setHudExtra({
+            weather: Weather.current,
+            mapType: currentMap.type,
+            dungeonFloor: dungeonFloor
+        });
         UI.renderHUD(ctx, player);
         UI.renderHotbar(ctx, player);
         UI.renderMinimap(ctx, map, player);
@@ -1033,6 +1183,141 @@ const Game = (() => {
         if (state === STATE.CRAFTING) UI.renderCrafting(ctx, player);
         if (state === STATE.DIALOGUE) NPCDialogue.render(ctx);
         if (state === STATE.FISHING) Fishing.render(ctx);
+        if (state === STATE.PAUSED) renderPaused();
+
+        // Interaction prompt (when playing, near interactable)
+        if (state === STATE.PLAYING && !player.dead) {
+            renderInteractionPrompt();
+        }
+
+        // Hotbar tooltip
+        if (state === STATE.PLAYING) {
+            renderHotbarTooltip();
+        }
+
+        // Close screen shake transform
+        ctx.restore();
+    }
+
+    function renderPaused() {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+        const pw = 280, ph = 220;
+        const px = (CANVAS_W - pw) / 2, py = (CANVAS_H - ph) / 2;
+
+        ctx.fillStyle = 'rgba(25, 22, 40, 0.95)';
+        roundRect(ctx, px, py, pw, ph, 10);
+        ctx.fill();
+        ctx.strokeStyle = COLORS.UI_BORDER;
+        ctx.lineWidth = 2;
+        roundRect(ctx, px, py, pw, ph, 10);
+        ctx.stroke();
+
+        drawTextBold(ctx, 'PAUSED', CANVAS_W / 2, py + 18, COLORS.UI_TEXT, 24, 'center');
+
+        const opts = [
+            { key: 'ESC', label: 'Resume Game' },
+            { key: 'S', label: 'Save Game' },
+            { key: 'Q', label: 'Return to Title' }
+        ];
+        for (let i = 0; i < opts.length; i++) {
+            const oy = py + 70 + i * 40;
+            ctx.fillStyle = 'rgba(90, 138, 74, 0.15)';
+            roundRect(ctx, px + 20, oy, pw - 40, 32, 6);
+            ctx.fill();
+            drawTextBold(ctx, opts[i].key, px + 36, oy + 8, COLORS.UI_GOLD, 14, 'left');
+            drawText(ctx, opts[i].label, px + 80, oy + 9, COLORS.UI_TEXT, 14, 'left', false);
+        }
+
+        // Stats display
+        drawText(ctx, `Lv${player.level} | Day ${player.day} ${player.seasonName} | ${player.gold}G`,
+            CANVAS_W / 2, py + ph - 28, COLORS.UI_TEXT_DIM, 11, 'center');
+    }
+
+    function renderInteractionPrompt() {
+        const facing = player.getFacingTile();
+        const fx = facing.x, fy = facing.y;
+
+        let promptText = null;
+        let promptY = fy;
+        let promptX = fx;
+
+        // Check interactable at facing tile
+        let inter = currentMap.getInteractable(fx, fy) || currentMap.getInteractable(player.x, player.y);
+
+        // Proximity house door
+        if (!inter && currentMap.type === MAP_TYPE.OVERWORLD) {
+            for (const ia of currentMap.interactables) {
+                if (ia.type === INTERACT_TYPE.HOUSE_DOOR && manhattan(player.x, player.y, ia.x, ia.y) <= 2) {
+                    inter = ia;
+                    promptX = ia.x;
+                    promptY = ia.y;
+                    break;
+                }
+            }
+        }
+
+        // NPC
+        const npc = currentMap.getNPC(fx, fy);
+        if (npc) {
+            promptText = npc.shopType ? '[E] Shop' : '[E] Talk';
+        } else if (inter) {
+            switch (inter.type) {
+                case INTERACT_TYPE.HOUSE_DOOR: promptText = '[E] Enter'; break;
+                case INTERACT_TYPE.HOUSE_EXIT: promptText = '[E] Exit'; break;
+                case INTERACT_TYPE.BED: promptText = '[E] Sleep'; break;
+                case INTERACT_TYPE.CHEST:
+                    promptText = inter.data && inter.data.opened ? '[E] (Opened)' : '[E] Open'; break;
+                case INTERACT_TYPE.CRAFTING_BENCH: promptText = '[E] Craft'; break;
+                case INTERACT_TYPE.SHIPPING_BIN: promptText = '[E] Sell'; break;
+                case INTERACT_TYPE.FISHING_SPOT: promptText = '[E] Fish'; break;
+                case INTERACT_TYPE.DUNGEON_ENTRANCE: promptText = '[E] Enter Dungeon'; break;
+                case INTERACT_TYPE.DUNGEON_EXIT: promptText = '[E] Leave Dungeon'; break;
+                case INTERACT_TYPE.STAIRS_DOWN: promptText = '[E] Go Deeper'; break;
+            }
+        }
+
+        // Enemy
+        if (!promptText && currentMap.type === MAP_TYPE.DUNGEON) {
+            const enemy = currentMap.getEnemy(fx, fy);
+            if (enemy && enemy.hp > 0) {
+                promptText = '[E] Attack';
+            }
+        }
+
+        if (promptText) {
+            const sx = promptX * TILE - camX + HALF_TILE;
+            const sy = promptY * TILE - camY - 14;
+            const bob = Math.sin(frame * 0.1) * 2;
+            ctx.font = '11px "Nunito", sans-serif';
+            const tw = ctx.measureText(promptText).width;
+            ctx.fillStyle = 'rgba(20, 18, 30, 0.8)';
+            roundRect(ctx, sx - tw / 2 - 6, sy - 4 + bob, tw + 12, 18, 4);
+            ctx.fill();
+            drawText(ctx, promptText, sx, sy + bob, COLORS.UI_HIGHLIGHT, 11, 'center', false);
+        }
+    }
+
+    function renderHotbarTooltip() {
+        const slot = player.getSelectedItem();
+        if (!slot) return;
+        const item = ITEM_DB[slot.id];
+        if (!item) return;
+
+        // Position above selected hotbar slot
+        const slots = 8, slotSize = 38, gap = 4;
+        const totalW = slots * slotSize + (slots - 1) * gap;
+        const hx = (CANVAS_W - totalW) / 2;
+        const sx = hx + player.selectedSlot * (slotSize + gap) + slotSize / 2;
+        const sy = CANVAS_H - slotSize - 30;
+
+        ctx.font = '11px "Nunito", sans-serif';
+        const tw = ctx.measureText(item.name).width;
+        ctx.fillStyle = 'rgba(20, 18, 30, 0.85)';
+        roundRect(ctx, sx - tw / 2 - 6, sy - 4, tw + 12, 18, 4);
+        ctx.fill();
+        drawText(ctx, item.name, sx, sy, COLORS.UI_TEXT, 11, 'center', false);
     }
 
     function renderObject(obj, x, y) {

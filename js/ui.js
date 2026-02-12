@@ -14,6 +14,10 @@ const UI = (() => {
         messages.push({ text, timer: duration || 120 });
     }
 
+    // Extra HUD info set by the game
+    let hudExtra = {};
+    function setHudExtra(info) { hudExtra = info || {}; }
+
     // ---- HUD ----
     function renderHUD(ctx, player) {
         // Top-left panel
@@ -59,6 +63,26 @@ const UI = (() => {
         drawText(ctx, `Day ${player.day}`, barX + 60, by, COLORS.UI_TEXT, 12, 'left', false);
         drawText(ctx, `${player.seasonName}`, barX + 110, by, COLORS.UI_GREEN, 12, 'left', false);
         drawText(ctx, player.timeString, barX + 170, by, COLORS.UI_TEXT, 12, 'left', false);
+
+        // Weather icon (overworld only)
+        if (hudExtra.weather && hudExtra.mapType === 'overworld') {
+            const wx = px + pw - 36, wy = py + 6;
+            let weatherLabel = '';
+            let weatherColor = COLORS.UI_TEXT_DIM;
+            switch (hudExtra.weather) {
+                case WEATHER.CLEAR: weatherLabel = 'Clear'; weatherColor = '#f0e060'; break;
+                case WEATHER.CLOUDY: weatherLabel = 'Cloudy'; weatherColor = '#a0a0b0'; break;
+                case WEATHER.RAIN: weatherLabel = 'Rain'; weatherColor = '#6aaedd'; break;
+                case WEATHER.STORM: weatherLabel = 'Storm'; weatherColor = '#aa80e0'; break;
+            }
+            drawText(ctx, weatherLabel, wx, wy, weatherColor, 9, 'left', false);
+        }
+
+        // Dungeon floor
+        if (hudExtra.mapType === 'dungeon' && hudExtra.dungeonFloor) {
+            const dfx = px + pw - 36, dfy = py + 6;
+            drawTextBold(ctx, `F${hudExtra.dungeonFloor}`, dfx, dfy, COLORS.UI_PURPLE, 12, 'left');
+        }
     }
 
     // ---- HOTBAR ----
@@ -138,6 +162,7 @@ const UI = (() => {
                     case TILES.SAND: color = '#d4b878'; break;
                     case TILES.PATH: color = '#c4a870'; break;
                     case TILES.STONE: color = '#7a7a8a'; break;
+                    case TILES.BRIDGE: color = '#a08050'; break;
                     case TILES.FARM_DIRT: color = '#7a5a3a'; break;
                     case TILES.DIRT: color = '#9b7d5a'; break;
                     case TILES.DUNGEON_FLOOR: color = '#4a4555'; break;
@@ -269,10 +294,12 @@ const UI = (() => {
 
         const listY = py + 42;
         const itemH = 38;
-        const visible = Math.min(shopItems.length, 9);
+        const maxVisible = 9;
+        const scrollStart = Math.max(0, Math.min(shopScroll - Math.floor(maxVisible / 2), shopItems.length - maxVisible));
+        const visible = Math.min(shopItems.length, maxVisible);
 
         for (let i = 0; i < visible; i++) {
-            const idx = i + Math.max(0, shopScroll);
+            const idx = i + scrollStart;
             if (idx >= shopItems.length) break;
 
             const itemId = shopItems[idx];
@@ -346,10 +373,12 @@ const UI = (() => {
         const listY = py + 40;
         const itemH = 50;
         const recipes = RECIPES;
-        const visible = Math.min(recipes.length, 7);
+        const maxVisible = 7;
+        const craftStart = Math.max(0, Math.min(craftScroll - Math.floor(maxVisible / 2), recipes.length - maxVisible));
+        const visible = Math.min(recipes.length, maxVisible);
 
         for (let i = 0; i < visible; i++) {
-            const idx = i + Math.max(0, craftScroll - 3);
+            const idx = i + craftStart;
             if (idx < 0 || idx >= recipes.length) continue;
 
             const recipe = recipes[idx];
@@ -435,7 +464,7 @@ const UI = (() => {
     }
 
     return {
-        showMessage, openShop,
+        showMessage, openShop, setHudExtra,
         renderHUD, renderHotbar, renderMinimap,
         renderInventory, renderShop, renderCrafting,
         updateMessages, renderMessages,
